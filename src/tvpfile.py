@@ -1,22 +1,18 @@
-import os
-from typing import Dict, Union
-
-import yaml
-
 import calc
 
 
 class TVPFile:
-    def __init__(self, filename: Union[str, os.PathLike]) -> None:
-        self.bpm_events = []
+    def __init__(self, path):
+        self.bpmevents = []
         self.notes = []
         self.metadata = {}
-        self.filename = filename
+        self.path = path
             
 
-    def read(self) -> None:
-        with open(self.filename, 'rt') as f:
-            for line in f:
+    def read(self):
+        with open(self.path, 'rt') as f:
+            for current_pos, line in enumerate(f, start=1):
+                self.current_pos = current_pos
                 line = line.strip('\n;')
                 match line.split(':', 1):
                     case ['#b', value]:
@@ -27,12 +23,17 @@ class TVPFile:
                         key = key.strip('#')
                         self.metadata[key] = value
 
-        self.bpm_events.sort(key=lambda x: x['pulse'])
+        self.bpmevents.sort(key=lambda x: x['pulse'])
         self.notes.sort(key=lambda x: x['pulse'])
 
 
-    def read_bpm_event(self, b: str) -> None:
-        measure, bpm, timing = b.split(':')
+    def read_bpm_event(self, b):
+        try:
+            measure, bpm, timing = b.split(':')
+        except:
+            print(f'Bad BPM change syntax at line {self.current_pos}, ignoring.')
+            return
+
         measure = int(measure)
         bpm = float(bpm)
         parts = len(timing) - 1
@@ -41,18 +42,23 @@ class TVPFile:
             if x == '1':
                 submeasure = i / parts
                 pulse = calc.calc_pulse(measure, submeasure)
-                self.bpm_events.append(self.make_bpm_event(pulse, bpm))
+                self.bpmevents.append(self.make_bpm_event(pulse, bpm))
         
 
-    def make_bpm_event(self, pulse: int, bpm: float) -> Dict:
+    def make_bpm_event(self, pulse, bpm):
         return {
             'pulse': pulse,
             'bpm': bpm
         }
 
 
-    def read_note(self, p: str) -> None:
-        measure, lane, timing = p.split(':')
+    def read_note(self, p):
+        try:
+            measure, lane, timing = p.split(':')
+        except:
+            print(f'Bad note syntax at line {self.current_pos}, ignoring.')
+            return
+
         measure = int(measure)
         lane = int(lane) - 1    # 1-indexed to 0-indexed
         parts = len(timing) - 1
@@ -67,7 +73,7 @@ class TVPFile:
             self.notes.append(self.make_note(type, pulse, lane, end_of_scan))
 
 
-    def make_note(self, type: str, pulse: int, lane: int, end_of_scan: bool) -> Dict:
+    def make_note(self, type, pulse, lane, end_of_scan):
         return {
             'type': type,
             'pulse': pulse,
@@ -127,10 +133,3 @@ class TVPFile:
 
 
 # def count_hold(action):
-    
-    
-
-if __name__ == '__main__':
-
-    with open('config.yaml', 'rt') as c:
-        config = yaml.safe_load(c)
