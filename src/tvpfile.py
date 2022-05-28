@@ -9,6 +9,7 @@ class TVPFile:
         self.path = path
             
 
+    # read the file, calculate pulse from the tvp format, prepare metadata
     def read(self):
         with open(self.path, 'rt') as f:
             for current_pos, line in enumerate(f, start=1):
@@ -23,6 +24,7 @@ class TVPFile:
                         key = key.strip('#')
                         self.metadata[key] = value
 
+        self.prepare_metadata()
         self.bpmevents.sort(key=lambda x: x['pulse'])
         self.notes.sort(key=lambda x: x['pulse'])
 
@@ -81,9 +83,16 @@ class TVPFile:
             'end_of_scan': end_of_scan
         }
 
-
-
-
+    def prepare_metadata(self):
+        self.title = self.metadata['title']
+        self.artist = self.metadata['artist']
+        self.genre = self.metadata['genre']
+        self.creator = self.metadata['creator']
+        self.pattern = self.metadata['pattern']
+        self.measure = int(self.metadata['measure'])
+        self.bps = int(self.metadata['measure']) * 4
+        self.level = int(self.metadata['level'])
+        self.bpm = float(self.metadata['bpm'])
 
 
 

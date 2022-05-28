@@ -21,8 +21,26 @@ def main():
         message += file.path.name
     print(message)
 
-    
-        
+    for file in inputfiles:
+        file.read()
+
+        # ask for the desired bps since in viur it can only be 4 or 8
+        looping = True
+        while looping:
+            inp = input(f'Enter the bps desired for "{file.path.name}". ' +
+                f'Leave blank to keep the original value ({file.bps}).\n')
+            if inp:
+                try:
+                    int(inp)
+                except ValueError:
+                    print('Error. Please enter an integer.')
+                else:
+                    looping = False
+            else:
+                looping = False
+        file.bps = inp
+
+
 
 if __name__ == '__main__':
     main()
