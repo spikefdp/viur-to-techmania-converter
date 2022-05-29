@@ -1,3 +1,7 @@
+from typing import Dict, Tuple
+
+from click import secho
+
 from viurtotech import calc
 
 
@@ -5,12 +9,12 @@ class TVPFile:
     def __init__(self, path):
         self.bpmevents = []
         self.notes = []
-        self.metadata = {}
+        self._metadata = {}
         self.path = path
             
 
     # read the file from the provided section
-    def read(self, *section):
+    def read(self, *section: Tuple[str]):
         with open(self.path, 'rt') as f:
             for current_pos, line in enumerate(f, start=1):
                 self.current_pos = current_pos
@@ -22,63 +26,67 @@ class TVPFile:
                 elif (line[0].startswith('#') and line[0] not in ('#b', '#p')
                     and 'metadata' in section):
                     key = line[0].strip('#')
-                    self.metadata[key] = line[1]
+                    self._metadata[key] = line[1]
 
         if 'metadata' in section:
             self.prepare_metadata()
         if 'bpm' in section:
             self.bpmevents.sort(key=lambda x: x['pulse'])
+            self.adjust_bpm()
         if 'note' in section:
             self.notes.sort(key=lambda x: x['pulse'])
 
 
-    def read_bpm_event(self, b):
+    def read_bpm_event(self, b: str):
         try:
             measure, bpm, timing = b.split(':')
+            measure = int(measure)
+            bpm = float(bpm)
+            parts = len(timing) - 1
         except ValueError:
-            print(f'Bad BPM change syntax at line {self.current_pos}, ignoring.')
+            secho(f'Bad BPM change syntax at line {self.current_pos}, ignoring.',
+                err=True, fg='yellow')
             return
 
-        measure = int(measure)
-        bpm = float(bpm)
-        parts = len(timing) - 1
+        if self.targ_bps != self.orig_bps:
+            bpm = calc.adjust_bpm(bpm, self.targ_bps, self.orig_bps)
 
         for i, x in enumerate(timing):
             if x == '1':
                 submeasure = i / parts
-                pulse = calc.calc_pulse(measure, submeasure)
+                pulse = calc.calc_pulse(measure, submeasure, self.targ_bps)
                 self.bpmevents.append(self.make_bpm_event(pulse, bpm))
         
 
-    def make_bpm_event(self, pulse, bpm):
+    def make_bpm_event(self, pulse: int, bpm: float) -> Dict:
         return {
             'pulse': pulse,
             'bpm': bpm
         }
 
 
-    def read_note(self, p):
+    def read_note(self, p: str):
         try:
             measure, lane, timing = p.split(':')
+            measure = int(measure)
+            lane = int(lane) - 1    # 1-indexed to 0-indexed
+            parts = len(timing) - 1
         except ValueError:
-            print(f'Bad note syntax at line {self.current_pos}, ignoring.')
+            secho(f'Bad note syntax at line {self.current_pos}, ignoring.',
+                err=True, fg='yellow')
             return
-
-        measure = int(measure)
-        lane = int(lane) - 1    # 1-indexed to 0-indexed
-        parts = len(timing) - 1
 
         for i, type in enumerate(timing):
             if type == '-' or type == '0':
                 continue
 
             submeasure = i / parts
-            pulse = calc.calc_pulse(measure, submeasure)
+            pulse = calc.calc_pulse(measure, submeasure, self.targ_bps)
             end_of_scan = True if submeasure == 1 else False
             self.notes.append(self.make_note(type, pulse, lane, end_of_scan))
 
 
-    def make_note(self, type, pulse, lane, end_of_scan):
+    def make_note(self, type: str, pulse: int, lane: int, end_of_scan: bool) -> Dict:
         return {
             'type': type,
             'pulse': pulse,
@@ -86,21 +94,23 @@ class TVPFile:
             'end_of_scan': end_of_scan
         }
 
+
     def prepare_metadata(self):
-        self.title = self.metadata['title']
-        self.artist = self.metadata['artist']
-        self.genre = self.metadata['genre']
-        self.creator = self.metadata['creator']
-        self.pattern = self.metadata['pattern']
-        self.measure = int(self.metadata['measure'])
-        self.orig_bps = int(self.metadata['measure']) * 4
+        self.title = self._metadata['title']
+        self.artist = self._metadata['artist']
+        self.genre = self._metadata['genre']
+        self.creator = self._metadata['creator']
+        self.pattern = self._metadata['pattern']
+        self.measure = int(self._metadata['measure'])
+        self.orig_bps = int(self._metadata['measure']) * 4
         self.targ_bps = None
-        self.level = int(self.metadata['level'])
-        self.bpm = float(self.metadata['bpm'])
+        self.level = int(self._metadata['level'])
+        self.bpm = float(self._metadata['bpm'])
+
 
     def adjust_bpm(self):
-        
-        self.bpm = calc.adjust_bpm(self.bpm, )
+        if self.targ_bps != self.orig_bps:
+            self.bpm = calc.adjust_bpm(self.bpm, self.targ_bps, self.orig_bps)
 
 
 
