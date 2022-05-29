@@ -1,4 +1,4 @@
-import calc
+from viurtotech import calc
 
 
 class TVPFile:
@@ -9,30 +9,33 @@ class TVPFile:
         self.path = path
             
 
-    # read the file, calculate pulse from the tvp format, prepare metadata
-    def read(self):
+    # read the file from the provided section
+    def read(self, *section):
         with open(self.path, 'rt') as f:
             for current_pos, line in enumerate(f, start=1):
                 self.current_pos = current_pos
-                line = line.strip('\n;')
-                match line.split(':', 1):
-                    case ['#b', value]:
-                        self.read_bpm_event(value)
-                    case ['#p', value]:
-                        self.read_note(value)
-                    case [key, value] if key.startswith('#'):
-                        key = key.strip('#')
-                        self.metadata[key] = value
+                line = line.strip('\n;').split(':', 1)
+                if line[0] == '#b' and 'bpm' in section:
+                    self.read_bpm_event(line[1])
+                elif line[0] == '#p' and 'note' in section:
+                    self.read_note(line[1])
+                elif (line[0].startswith('#') and line[0] not in ('#b', '#p')
+                    and 'metadata' in section):
+                    key = line[0].strip('#')
+                    self.metadata[key] = line[1]
 
-        self.prepare_metadata()
-        self.bpmevents.sort(key=lambda x: x['pulse'])
-        self.notes.sort(key=lambda x: x['pulse'])
+        if 'metadata' in section:
+            self.prepare_metadata()
+        if 'bpm' in section:
+            self.bpmevents.sort(key=lambda x: x['pulse'])
+        if 'note' in section:
+            self.notes.sort(key=lambda x: x['pulse'])
 
 
     def read_bpm_event(self, b):
         try:
             measure, bpm, timing = b.split(':')
-        except:
+        except ValueError:
             print(f'Bad BPM change syntax at line {self.current_pos}, ignoring.')
             return
 
@@ -57,7 +60,7 @@ class TVPFile:
     def read_note(self, p):
         try:
             measure, lane, timing = p.split(':')
-        except:
+        except ValueError:
             print(f'Bad note syntax at line {self.current_pos}, ignoring.')
             return
 
@@ -90,9 +93,14 @@ class TVPFile:
         self.creator = self.metadata['creator']
         self.pattern = self.metadata['pattern']
         self.measure = int(self.metadata['measure'])
-        self.bps = int(self.metadata['measure']) * 4
+        self.orig_bps = int(self.metadata['measure']) * 4
+        self.targ_bps = None
         self.level = int(self.metadata['level'])
         self.bpm = float(self.metadata['bpm'])
+
+    def adjust_bpm(self):
+        
+        self.bpm = calc.adjust_bpm(self.bpm, )
 
 
 

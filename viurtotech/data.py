@@ -1,5 +1,3 @@
-pulse_per_beat = 240
-
 note_data = {
     '1' : {
         'type' : ['tap'],
