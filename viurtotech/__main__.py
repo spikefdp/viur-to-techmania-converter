@@ -1,13 +1,20 @@
+import logging
 from pathlib import Path
 
 import click
+import click_log
 
 from viurtotech.tvpfile import TVPFile
+
+
+logger = logging.getLogger(__name__)
+click_log.basic_config(logger)
 
 
 @click.command()
 @click.option('-p', '--path', 'inppath', default='.',
     help='Specify the path to look for the .tvp files')
+@click_log.simple_verbosity_option(logger)
 def main(inppath: str):
     # find tvp files in the directory
     p = Path(inppath)
@@ -28,7 +35,7 @@ def main(inppath: str):
 
         # ask for the desired bps since in viur it can only be 4 or 8
         # more details in README file
-        while file.targ_bps is None:
+        while file.bps is None:
             inp = click.prompt(
                 f'Enter the bps desired for "{file.path.name}". ' +
                 f'Leave blank to keep the original value ({file.orig_bps}).\n',
@@ -36,7 +43,7 @@ def main(inppath: str):
             if inp < 1:
                 click.secho('Error: bps must be at least 1.', err=True, fg='red')
             else:
-                file.targ_bps = inp
+                file.bps = inp
 
         file.read('bpm', 'note')
 
