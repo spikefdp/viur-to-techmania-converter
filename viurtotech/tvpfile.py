@@ -5,6 +5,8 @@ from viurtotech import calc
 from viurtotech.data import note_data
 
 
+logger = logging.getLogger(__name__)
+
 class TVPFile:
     def __init__(self, path: str | PathLike) -> None:
         self.bpmevents = []
@@ -44,7 +46,7 @@ class TVPFile:
             bpm = float(bpm)
             parts = len(timing) - 1
         except ValueError:
-            logging.warning(f'Bad BPM change syntax at line {self.current_pos}, ignoring.')
+            logger.warning(f'Bad BPM change syntax at line {self.current_pos}, ignoring.')
             return
 
         if self.bps != self.orig_bps:
@@ -71,7 +73,7 @@ class TVPFile:
             lane = int(lane) - 1    # 1-indexed to 0-indexed
             parts = len(timing) - 1
         except ValueError:
-            logging.warning(f'Bad note syntax at line {self.current_pos}, ignoring.')
+            logger.warning(f'Bad note syntax at line {self.current_pos}, ignoring.')
             return
 
         for i, type in enumerate(timing):
@@ -121,8 +123,9 @@ class TVPFile:
 
         for note in self.notes:
             match note_data[note['type']]['type']:
-                case a if 'hold_end' in a:
-                    pass
+                case a if 'hold_end' in a and self._is_holding[note['lane']]:
+                    print('yo')
+                    self._end_hold_note(note)
                 case ['hold']:
                     self._make_tech_hold_note(note)
                 case ['repeat', 'hold']:
@@ -138,33 +141,33 @@ class TVPFile:
 
 
     def _make_tech_note(self, note: dict) -> None:
-        note['type'] = note_data[note['type']]['type']
+        note['type'] = note_data[note['type']]['tech_type']
         self.tech_notes.append(note)
 
 
     def _make_tech_chain_note(self, note: dict) -> None:
         # viur put chain notes in the same lane so we have to correct the lane first
-        note['lane'] += note_data[type]['offset']
+        note['lane'] += note_data[note['type']]['offset']
         if note['lane'] >= 0:
+            note['type'] = note_data[note['type']]['tech_type']
             self.tech_notes.append(note)
         else:
-            note['type'] = note_data[note['type']]['type']
             measure = calc.calc_measure(note['pulse'], self.bps, note['end_of_scan'])
-            logging.warning(f'Ignoring a chain note above lane 1 at measure {measure}.')
+            logger.warning(f'Ignoring a chain note above lane 1 at measure {measure}.')
 
    
     def _make_tech_hold_note(self, note: dict) -> None:
         # make a 1 pulse hold note as a placeholder
-        note['type'] = note_data[note['type']]['type']
+        note['type'] = note_data[note['type']]['tech_type']
         note['duration'] = 1
         note['holding'] = True
         self.tech_holds.append(note)
-        self._is_holding[note['lane']] == True
+        self._is_holding[note['lane']] = True
 
 
     def _end_hold_note(self, end: dict) -> None:
         if not self._is_holding[end['lane']]:
-            logging.debug('_end_hold_note: _is_holding is False')
+            logger.debug('_end_hold_note: _is_holding is False')
             return
 
         idx = None
@@ -173,10 +176,8 @@ class TVPFile:
                 idx = -(i + 1)
                 break
         if idx is None:
-            logging.debug('_end_hold_note: cannot find idx')
-            return
-
-        self.tech_holds[idx]['duration'] = end['pulse'] - self.tech_holds[idx]['pulse']
-        self.tech_holds[idx]['holding'] = False
-        self._is_holding = False
-
+            logger.debug('_end_hold_note: cannot find idx')
+        else:
+            self.tech_holds[idx]['duration'] = end['pulse'] - self.tech_holds[idx]['pulse']
+            self.tech_holds[idx]['holding'] = False
+        self._is_holding[end['lane']] = False

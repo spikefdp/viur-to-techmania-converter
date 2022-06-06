@@ -2,19 +2,20 @@ import logging
 from pathlib import Path
 
 import click
-import click_log
+# import click_log
 
 from viurtotech.tvpfile import TVPFile
 
 
 logger = logging.getLogger(__name__)
-click_log.basic_config(logger)
+logging.basicConfig(filename='test.log', filemode='wt', level=logging.DEBUG)
+# click_log.basic_config(logger)
 
 
 @click.command()
 @click.option('-p', '--path', 'inppath', default='.',
     help='Specify the path to look for the .tvp files')
-@click_log.simple_verbosity_option(logger)
+# @click_log.simple_verbosity_option(logger)
 def main(inppath: str):
     # find tvp files in the directory
     p = Path(inppath)
@@ -46,6 +47,12 @@ def main(inppath: str):
                 file.bps = inp
 
         file.read('bpm', 'note')
+
+        logger.info(file.notes)
+
+        file.convert_notes()
+
+        logger.info(file.tech_holds)
 
 
 
