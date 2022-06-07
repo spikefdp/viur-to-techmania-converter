@@ -48,11 +48,11 @@ def main(inppath: str):
 
         file.read('bpm', 'note')
 
-        logger.info(file.notes)
+        # logger.debug(file.notes)
 
         file.convert_notes()
 
-        logger.info(file.tech_holds)
+        logger.debug(file.tech_holds)
 
 
 

@@ -1,25 +1,52 @@
+from dataclasses import dataclass
 import logging
-from os import PathLike
+from pathlib import Path
 
 from viurtotech import calc
 from viurtotech.data import note_data
 
 
-logger = logging.getLogger(__name__)
+@dataclass
+class Note:
+    type: str
+    pulse: int
+    lane: int
+    end_of_scan: bool
+
+    def to_hold_note(self, **kwargs):
+        return HoldNote(self.type, self.pulse, self.lane, self.end_of_scan, **kwargs)
+
+    def to_drag_note(self, **kwargs):
+        return DragNote(self.type, self.pulse, self.lane, self.end_of_scan, **kwargs)
+
+
+@dataclass
+class HoldNote(Note):
+    duration: int = 1
+    holding: bool = True
+
+
+@dataclass
+class DragNote(Note):
+    duration: int = 1
+    direction: int = 0
+    dragging: bool = True
+
 
 class TVPFile:
-    def __init__(self, path: str | PathLike) -> None:
-        self.bpmevents = []
-        self.notes = []
+    def __init__(self, path: Path) -> None:
+        self.bpmevents: list[dict] = []
+        self.notes: list[Note] = []
         self._metadata = {}
         self.path = path
+        self.logger = logging.getLogger(self.path.name)
             
 
     # read the file from the provided section
-    def read(self, *section: tuple[str]) -> None:
+    def read(self, *section: str) -> None:
         with open(self.path, 'rt') as f:
             for current_pos, line in enumerate(f, start=1):
-                self.current_pos = current_pos
+                self._current_pos = current_pos
                 line = line.strip('\n;').split(':', 1)
                 if line[0] == '#b' and 'bpm' in section:
                     self._read_bpm_event(line[1])
@@ -36,7 +63,8 @@ class TVPFile:
             self.bpmevents.sort(key=lambda x: x['pulse'])
             self._adjust_bpm()
         if 'note' in section:
-            self.notes.sort(key=lambda x: x['pulse'])
+            self.notes.sort(key=lambda x: x.lane)
+            self.notes.sort(key=lambda x: x.pulse)
 
 
     def _read_bpm_event(self, b: str) -> None:
@@ -46,7 +74,7 @@ class TVPFile:
             bpm = float(bpm)
             parts = len(timing) - 1
         except ValueError:
-            logger.warning(f'Bad BPM change syntax at line {self.current_pos}, ignoring.')
+            self.logger.warning(f'Bad BPM change syntax at line {self._current_pos}, ignoring.')
             return
 
         if self.bps != self.orig_bps:
@@ -73,26 +101,16 @@ class TVPFile:
             lane = int(lane) - 1    # 1-indexed to 0-indexed
             parts = len(timing) - 1
         except ValueError:
-            logger.warning(f'Bad note syntax at line {self.current_pos}, ignoring.')
+            self.logger.warning(f'Bad note syntax at line {self._current_pos}, ignoring.')
             return
 
         for i, type in enumerate(timing):
             if type == '-' or type == '0':
                 continue
-
             submeasure = i / parts
             pulse = calc.calc_pulse(measure, submeasure, self.bps)
             end_of_scan = True if submeasure == 1 else False
-            self.notes.append(self._make_note(type, pulse, lane, end_of_scan))
-
-
-    def _make_note(self, type: str, pulse: int, lane: int, end_of_scan: bool) -> dict:
-        return {
-            'type': type,
-            'pulse': pulse,
-            'lane': lane,
-            'end_of_scan': end_of_scan
-        }
+            self.notes.append(Note(type, pulse, lane, end_of_scan))
 
 
     def _prepare_metadata(self) -> None:
@@ -116,68 +134,98 @@ class TVPFile:
 
     # convert to techmania notes
     def convert_notes(self) -> None:
-        self.tech_notes = []
-        self.tech_holds = []
-        self.tech_drags = []
+        self.tech_notes: list[Note] = []
+        self.tech_holds: list[HoldNote] = []
+        self.tech_drags: list[DragNote] = []
         self._is_holding = [False, False, False, False]
+        self._is_dragging = [False, False, False, False]
 
         for note in self.notes:
-            match note_data[note['type']]['type']:
-                case a if 'hold_end' in a and self._is_holding[note['lane']]:
-                    print('yo')
+            match note_data[note.type]['type']:
+                case a if 'hold_end' in a and self._is_holding[note.lane]:
                     self._end_hold_note(note)
-                case ['hold']:
+                case a if 'hold' in a:
                     self._make_tech_hold_note(note)
-                case ['repeat', 'hold']:
-                    pass
-                case ['tap'] | ['repeat']:
+                case a if 'tap' in a or 'repeat' in a:
                     self._make_tech_note(note)
-                case ['chain'] | ['chain', 'end']:
+                case a if 'chain' in a:
                     self._make_tech_chain_note(note)
                 case ['drag']:
-                    pass
+                    self._make_tech_drag_note(note)
                 case ['drag_end']:
-                    pass
+                    self._end_drag_note(note)
 
 
-    def _make_tech_note(self, note: dict) -> None:
-        note['type'] = note_data[note['type']]['tech_type']
+    def _make_tech_note(self, note: Note) -> None:
+        note.type = note_data[note.type]['tech_type']
         self.tech_notes.append(note)
 
 
-    def _make_tech_chain_note(self, note: dict) -> None:
+    def _make_tech_chain_note(self, note: Note) -> None:
         # viur put chain notes in the same lane so we have to correct the lane first
-        note['lane'] += note_data[note['type']]['offset']
-        if note['lane'] >= 0:
-            note['type'] = note_data[note['type']]['tech_type']
+        note.lane += note_data[note.type]['offset']
+        if note.lane >= 0:
+            note.type = note_data[note.type]['tech_type']
             self.tech_notes.append(note)
         else:
-            measure = calc.calc_measure(note['pulse'], self.bps, note['end_of_scan'])
-            logger.warning(f'Ignoring a chain note above lane 1 at measure {measure}.')
+            measure = calc.calc_measure(note.pulse, self.bps, note.end_of_scan)
+            self.logger.warning(f'Ignoring a chain note above lane 1 at measure {measure}.')
 
    
-    def _make_tech_hold_note(self, note: dict) -> None:
+    def _make_tech_hold_note(self, note: Note) -> None:
         # make a 1 pulse hold note as a placeholder
-        note['type'] = note_data[note['type']]['tech_type']
-        note['duration'] = 1
-        note['holding'] = True
+        # -> set the hold flags for the current lane
+        note = note.to_hold_note()
+        note.type = note_data[note.type]['tech_type']
         self.tech_holds.append(note)
-        self._is_holding[note['lane']] = True
+        self._is_holding[note.lane] = True
 
 
-    def _end_hold_note(self, end: dict) -> None:
-        if not self._is_holding[end['lane']]:
-            logger.debug('_end_hold_note: _is_holding is False')
+    def _end_hold_note(self, end: Note) -> None:
+        # check whether the current lane is holding
+        # -> calculate hold duration by subtracting end pulse from head pulse 
+        # -> set the hold flags back to False
+        if not self._is_holding[end.lane]:
+            self.logger.debug('_end_hold_note: current lane\'s _is_holding is False')
             return
 
-        idx = None
-        for i, note in enumerate(reversed(self.tech_holds)):
-            if note['lane'] == end['lane'] and note['holding']:
-                idx = -(i + 1)
-                break
-        if idx is None:
-            logger.debug('_end_hold_note: cannot find idx')
+        gen = (n for n in reversed(self.tech_holds) if n.lane == end.lane and n.holding)
+        hold_head = next(gen, None)
+        if hold_head is None:
+            self.logger.debug('_end_hold_note: cannot find idx')
         else:
-            self.tech_holds[idx]['duration'] = end['pulse'] - self.tech_holds[idx]['pulse']
-            self.tech_holds[idx]['holding'] = False
-        self._is_holding[end['lane']] = False
+            hold_head.duration = end.pulse - hold_head.pulse
+            hold_head.holding = False
+        self._is_holding[end.lane] = False
+
+    
+    def _make_tech_drag_note(self, note: Note) -> None:
+        # make a 1 pulse drag note as a placeholder
+        # -> set the drag flags for the current lane
+        note = note.to_drag_note()
+        note.type = note_data[note.type]['tech_type']
+        self.tech_drags.append(note)
+        self._is_dragging[note.lane] = True
+
+    
+    def _end_drag_note(self, end: Note) -> None:
+        # find the topmost lane that started dragging
+        # -> calculate hold duration by subtracting end pulse from head pulse
+        # -> calculate direction by subtraction end lane from head lane
+        # -> set the hold flags back to False
+        if True not in self._is_dragging:
+            self.logger.debug('_end_drag_note: no dragging lane found')
+            return
+        start_lane = self._is_dragging.index(True)
+
+        gen = (n for n in reversed(self.tech_drags) if n.lane == start_lane and n.dragging)
+        drag_head = next(gen, None)
+        if drag_head is None:
+            measure = calc.calc_measure(end.pulse, self.bps, end.end_of_scan)
+            print(end.pulse)
+            self.logger.debug(f'_end_drag_note: cannot find drag head at measure {measure}')
+        else:
+            drag_head.duration = end.pulse - drag_head.pulse
+            drag_head.direction = end.lane - start_lane
+            drag_head.dragging = False
+        self._is_holding[start_lane] = False

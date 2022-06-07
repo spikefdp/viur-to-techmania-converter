@@ -6,7 +6,7 @@ def calc_pulse(measure: int, submeasure: float, bps: int) -> int:
 
 
 def calc_measure(pulse: int, bps: int, end_of_scan: bool) -> int:
-    return round(pulse / bps / config.pulse_per_beat) - int(end_of_scan)
+    return int(pulse / bps / config.pulse_per_beat) - int(end_of_scan)
 
 
 def adjust_bpm(bpm: float, targ_bps: int, orig_bps: int) -> float:

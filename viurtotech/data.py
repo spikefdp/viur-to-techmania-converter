@@ -11,12 +11,12 @@ note_data = {
         'type' : ['hold_end'],
         'tech_type' : None
     },
-    'X' : {
-        'type' : ['hold'],
+    'x' : {
+        'type' : [],
         'tech_type' : None
     },
-    'x' : {
-        'type' : ['hold'],
+    'X' : {
+        'type' : [],
         'tech_type' : None
     },
     '4' : {
