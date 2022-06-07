@@ -47,12 +47,9 @@ def main(inppath: str):
                 file.bps = inp
 
         file.read('bpm', 'note')
-
-        # logger.debug(file.notes)
-
         file.convert_notes()
 
-        logger.debug(file.tech_holds)
+        logger.debug(file.notes)
 
 
 

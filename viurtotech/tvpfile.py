@@ -1,23 +1,25 @@
 from dataclasses import dataclass
-import logging
 from pathlib import Path
 
-from viurtotech import calc
+from viurtotech import utils
 from viurtotech.data import note_data
 
 
 @dataclass
 class Note:
     type: str
+    measure: int
     pulse: int
     lane: int
     end_of_scan: bool
 
     def to_hold_note(self, **kwargs):
-        return HoldNote(self.type, self.pulse, self.lane, self.end_of_scan, **kwargs)
+        return HoldNote(self.type, self.measure, self.pulse,
+                        self.lane, self.end_of_scan, **kwargs)
 
     def to_drag_note(self, **kwargs):
-        return DragNote(self.type, self.pulse, self.lane, self.end_of_scan, **kwargs)
+        return DragNote(self.type, self.measure, self.pulse,
+                        self.lane, self.end_of_scan, **kwargs)
 
 
 @dataclass
@@ -39,9 +41,8 @@ class TVPFile:
         self.notes: list[Note] = []
         self._metadata = {}
         self.path = path
-        self.logger = logging.getLogger(self.path.name)
-            
 
+            
     # read the file from the provided section
     def read(self, *section: str) -> None:
         with open(self.path, 'rt') as f:
@@ -68,22 +69,24 @@ class TVPFile:
 
 
     def _read_bpm_event(self, b: str) -> None:
+        logger = utils.make_logger(self.path.name, '_read_bpm_event')
+
         try:
             measure, bpm, timing = b.split(':')
             measure = int(measure)
             bpm = float(bpm)
             parts = len(timing) - 1
         except ValueError:
-            self.logger.warning(f'Bad BPM change syntax at line {self._current_pos}, ignoring.')
+            logger.warning(f'Bad BPM change syntax at line {self._current_pos}, ignoring.')
             return
 
         if self.bps != self.orig_bps:
-            bpm = calc.adjust_bpm(bpm, self.bps, self.orig_bps)
+            bpm = utils.adjust_bpm(bpm, self.bps, self.orig_bps)
 
         for i, x in enumerate(timing):
             if x == '1':
                 submeasure = i / parts
-                pulse = calc.calc_pulse(measure, submeasure, self.bps)
+                pulse = utils.calc_pulse(measure, submeasure, self.bps)
                 self.bpmevents.append(self._make_bpm_event(pulse, bpm))
         
 
@@ -95,22 +98,24 @@ class TVPFile:
 
 
     def _read_note(self, p: str) -> None:
+        logger = utils.make_logger(self.path.name, '_read_note')
+
         try:
             measure, lane, timing = p.split(':')
             measure = int(measure)
             lane = int(lane) - 1    # 1-indexed to 0-indexed
             parts = len(timing) - 1
         except ValueError:
-            self.logger.warning(f'Bad note syntax at line {self._current_pos}, ignoring.')
+            logger.warning(f'Bad note syntax at line {self._current_pos}, ignoring.')
             return
 
         for i, type in enumerate(timing):
             if type == '-' or type == '0':
                 continue
             submeasure = i / parts
-            pulse = calc.calc_pulse(measure, submeasure, self.bps)
+            pulse = utils.calc_pulse(measure, submeasure, self.bps)
             end_of_scan = True if submeasure == 1 else False
-            self.notes.append(Note(type, pulse, lane, end_of_scan))
+            self.notes.append(Note(type, measure, pulse, lane, end_of_scan))
 
 
     def _prepare_metadata(self) -> None:
@@ -128,8 +133,7 @@ class TVPFile:
 
     def _adjust_bpm(self) -> None:
         if self.bps != self.orig_bps:
-            self.bpm = calc.adjust_bpm(self.bpm, self.bps, self.orig_bps)
-
+            self.bpm = utils.adjust_bpm(self.bpm, self.bps, self.orig_bps)
 
 
     # convert to techmania notes
@@ -163,13 +167,14 @@ class TVPFile:
 
     def _make_tech_chain_note(self, note: Note) -> None:
         # viur put chain notes in the same lane so we have to correct the lane first
+        logger = utils.make_logger(self.path.name, '_make_tech_chain_note', note.measure)
+
         note.lane += note_data[note.type]['offset']
         if note.lane >= 0:
             note.type = note_data[note.type]['tech_type']
             self.tech_notes.append(note)
         else:
-            measure = calc.calc_measure(note.pulse, self.bps, note.end_of_scan)
-            self.logger.warning(f'Ignoring a chain note above lane 1 at measure {measure}.')
+            logger.warning('Ignoring a chain note above the top lane.')
 
    
     def _make_tech_hold_note(self, note: Note) -> None:
@@ -185,14 +190,16 @@ class TVPFile:
         # check whether the current lane is holding
         # -> calculate hold duration by subtracting end pulse from head pulse 
         # -> set the hold flags back to False
+        logger = utils.make_logger(self.path.name, '_end_hold_note', end.measure, end.lane)
+
         if not self._is_holding[end.lane]:
-            self.logger.debug('_end_hold_note: current lane\'s _is_holding is False')
+            logger.debug('current lane\'s _is_holding is False')
             return
 
         gen = (n for n in reversed(self.tech_holds) if n.lane == end.lane and n.holding)
         hold_head = next(gen, None)
         if hold_head is None:
-            self.logger.debug('_end_hold_note: cannot find idx')
+            self.logger.debug('cannot find idx')
         else:
             hold_head.duration = end.pulse - hold_head.pulse
             hold_head.holding = False
@@ -213,19 +220,19 @@ class TVPFile:
         # -> calculate hold duration by subtracting end pulse from head pulse
         # -> calculate direction by subtraction end lane from head lane
         # -> set the hold flags back to False
+        logger = utils.make_logger(self.path.name, '_end_drag_note', end.measure, end.lane)
+
         if True not in self._is_dragging:
-            self.logger.debug('_end_drag_note: no dragging lane found')
+            logger.debug('No dragging lane found.')
             return
         start_lane = self._is_dragging.index(True)
 
         gen = (n for n in reversed(self.tech_drags) if n.lane == start_lane and n.dragging)
         drag_head = next(gen, None)
         if drag_head is None:
-            measure = calc.calc_measure(end.pulse, self.bps, end.end_of_scan)
-            print(end.pulse)
-            self.logger.debug(f'_end_drag_note: cannot find drag head at measure {measure}')
+            logger.debug('Cannot find drag head.')
         else:
             drag_head.duration = end.pulse - drag_head.pulse
             drag_head.direction = end.lane - start_lane
             drag_head.dragging = False
-        self._is_holding[start_lane] = False
+        self._is_dragging[start_lane] = False
