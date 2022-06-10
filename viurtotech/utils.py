@@ -16,5 +16,4 @@ def adjust_bpm(bpm: float, targ_bps: int, orig_bps: int) -> float:
 
 
 def make_logger(*args) -> Logger:
-    args = (str(a) for a in args)
-    return getLogger(':'.join(args))
+    return getLogger(':'.join(str(a) for a in args))

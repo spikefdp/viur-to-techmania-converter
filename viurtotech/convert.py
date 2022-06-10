@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from viurtotech import utils
+from viurtotech.config import pulse_per_beat
 from viurtotech.data import note_data
 
 
@@ -48,15 +49,17 @@ class TVPFile:
         with open(self.path, 'rt') as f:
             for current_pos, line in enumerate(f, start=1):
                 self._current_pos = current_pos
-                line = line.strip('\n;').split(':', 1)
-                if line[0] == '#b' and 'bpm' in section:
-                    self._read_bpm_event(line[1])
-                elif line[0] == '#p' and 'note' in section:
-                    self._read_note(line[1])
-                elif (line[0].startswith('#') and line[0] not in ('#b', '#p')
-                    and 'metadata' in section):
-                    key = line[0].strip('#')
-                    self._metadata[key] = line[1]
+                try:
+                    sec, dat = line.strip('\n;').split(':', 1)
+                except ValueError:
+                    continue
+                if sec == '#b' and 'bpm' in section:
+                    self._read_bpm_event(dat)
+                elif sec == '#p' and 'note' in section:
+                    self._read_note(dat)
+                elif sec.startswith('#') and sec not in ('#b', '#p') and 'metadata' in section:
+                    key = sec.strip('#')
+                    self._metadata[key] = dat
 
         if 'metadata' in section:
             self._prepare_metadata()
@@ -76,18 +79,19 @@ class TVPFile:
             measure = int(measure)
             bpm = float(bpm)
             parts = len(timing) - 1
-        except ValueError:
+
+            if self.bps != self.orig_bps:
+                bpm = utils.adjust_bpm(bpm, self.bps, self.orig_bps)
+    
+            for i, x in enumerate(timing):
+                if x == '1':
+                    submeasure = i / parts
+                    pulse = utils.calc_pulse(measure, submeasure, self.bps)
+                    self.bpmevents.append(self._make_bpm_event(pulse, bpm))
+
+        except (ValueError, TypeError):
             logger.warning(f'Bad BPM change syntax at line {self._current_pos}, ignoring.')
             return
-
-        if self.bps != self.orig_bps:
-            bpm = utils.adjust_bpm(bpm, self.bps, self.orig_bps)
-
-        for i, x in enumerate(timing):
-            if x == '1':
-                submeasure = i / parts
-                pulse = utils.calc_pulse(measure, submeasure, self.bps)
-                self.bpmevents.append(self._make_bpm_event(pulse, bpm))
         
 
     def _make_bpm_event(self, pulse: int, bpm: float) -> dict:
@@ -105,17 +109,18 @@ class TVPFile:
             measure = int(measure)
             lane = int(lane) - 1    # 1-indexed to 0-indexed
             parts = len(timing) - 1
-        except ValueError:
+
+            for i, type in enumerate(timing):
+                if type == '-' or type == '0':
+                    continue
+                submeasure = i / parts
+                pulse = utils.calc_pulse(measure, submeasure, self.bps)
+                end_of_scan = True if submeasure == 1 else False
+                self.notes.append(Note(type, measure, pulse, lane, end_of_scan))
+
+        except (ValueError, TypeError):
             logger.warning(f'Bad note syntax at line {self._current_pos}, ignoring.')
             return
-
-        for i, type in enumerate(timing):
-            if type == '-' or type == '0':
-                continue
-            submeasure = i / parts
-            pulse = utils.calc_pulse(measure, submeasure, self.bps)
-            end_of_scan = True if submeasure == 1 else False
-            self.notes.append(Note(type, measure, pulse, lane, end_of_scan))
 
 
     def _prepare_metadata(self) -> None:
@@ -193,13 +198,13 @@ class TVPFile:
         logger = utils.make_logger(self.path.name, '_end_hold_note', end.measure, end.lane)
 
         if not self._is_holding[end.lane]:
-            logger.debug('current lane\'s _is_holding is False')
+            logger.debug('Current lane\'s _is_holding is False.')
             return
 
         gen = (n for n in reversed(self.tech_holds) if n.lane == end.lane and n.holding)
         hold_head = next(gen, None)
         if hold_head is None:
-            self.logger.debug('cannot find idx')
+            logger.debug('Cannot find the hold note head.')
         else:
             hold_head.duration = end.pulse - hold_head.pulse
             hold_head.holding = False
@@ -230,7 +235,7 @@ class TVPFile:
         gen = (n for n in reversed(self.tech_drags) if n.lane == start_lane and n.dragging)
         drag_head = next(gen, None)
         if drag_head is None:
-            logger.debug('Cannot find drag head.')
+            logger.debug('Cannot find the drag note head.')
         else:
             drag_head.duration = end.pulse - drag_head.pulse
             drag_head.direction = end.lane - start_lane

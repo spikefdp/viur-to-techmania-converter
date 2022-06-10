@@ -4,7 +4,7 @@ from pathlib import Path
 import click
 # import click_log
 
-from viurtotech.tvpfile import TVPFile
+from viurtotech.convert import TVPFile
 
 
 logger = logging.getLogger(__name__)
