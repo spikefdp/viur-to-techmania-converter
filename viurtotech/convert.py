@@ -124,16 +124,15 @@ class TVPFile:
 
 
     def _prepare_metadata(self) -> None:
-        self.title = self._metadata['title']
-        self.artist = self._metadata['artist']
-        self.genre = self._metadata['genre']
-        self.creator = self._metadata['creator']
-        self.pattern = self._metadata['pattern']
-        self.measure = int(self._metadata['measure'])
-        self.orig_bps = int(self._metadata['measure']) * 4
-        self.bps = None
-        self.level = int(self._metadata['level'])
-        self.bpm = float(self._metadata['bpm'])
+        self.title = self._metadata.get('title', '')
+        self.artist = self._metadata.get('artist', '')
+        self.genre = self._metadata.get('genre', '')
+        self.creator = self._metadata.get('creator', '')
+        self.pattern = self._metadata.get('pattern', '')
+        self.measure = int(self._metadata.get('measure', 1))
+        self.orig_bps = self.measure * 4
+        self.level = int(self._metadata.get('level', 1))
+        self.bpm = float(self._metadata.get('bpm', 100.0))
 
 
     def _adjust_bpm(self) -> None:
