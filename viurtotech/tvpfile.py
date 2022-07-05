@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TypedDict
 
 from viurtotech import utils
 from viurtotech.config import pulse_per_beat
@@ -36,15 +37,21 @@ class DragNote(Note):
     dragging: bool = True
 
 
+class BPMEvent(TypedDict):
+    pulse: int
+    bpm: float
+
+
 class TVPFile:
     def __init__(self, path: Path) -> None:
-        self.bpmevents: list[dict] = []
+        self.bpmevents: list[BPMEvent] = []
         self.notes: list[Note] = []
-        self._metadata = {}
+        self._metadata: dict[str, str] = {}
         self.path = path
 
             
     # read the file from the provided section
+    # store them in the initialized variables as is
     def read(self, *section: str) -> None:
         with open(self.path, 'rt') as f:
             for current_pos, line in enumerate(f, start=1):
@@ -94,11 +101,12 @@ class TVPFile:
             return
         
 
-    def _make_bpm_event(self, pulse: int, bpm: float) -> dict:
-        return {
+    def _make_bpm_event(self, pulse: int, bpm: float) -> BPMEvent:
+        bpmev: BPMEvent = {
             'pulse': pulse,
             'bpm': bpm
         }
+        return bpmev
 
 
     def _read_note(self, p: str) -> None:
@@ -131,6 +139,7 @@ class TVPFile:
         self.pattern = self._metadata.get('pattern', '')
         self.measure = int(self._metadata.get('measure', 1))
         self.orig_bps = self.measure * 4
+        self.bps: int
         self.level = int(self._metadata.get('level', 1))
         self.bpm = float(self._metadata.get('bpm', 100.0))
 
@@ -140,7 +149,7 @@ class TVPFile:
             self.bpm = utils.adjust_bpm(self.bpm, self.bps, self.orig_bps)
 
 
-    # convert to techmania notes
+    # convert self.notes to techmania style notion
     def convert_notes(self) -> None:
         self.tech_notes: list[Note] = []
         self.tech_holds: list[HoldNote] = []
